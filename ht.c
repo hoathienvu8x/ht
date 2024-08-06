@@ -195,3 +195,19 @@ bool ht_next(hti* it) {
     }
     return false;
 }
+
+int ht_remove(ht* table, const char* key) {
+    uint64_t hash = hash_key(key);
+    size_t index;
+    if (!table) return -1;
+    index = (size_t)(hash & (uint64_t)(table->capacity - 1));
+    if (table->entries[index].key == NULL) return -1;
+    while (table->entries[index].key != NULL) {
+        if (strcmp(key, table->entries[index].key) == 0) {
+            free((void*)table->entries[index].key);
+            table->length--;
+            return 0;
+        }
+    }
+    return -1;
+}
