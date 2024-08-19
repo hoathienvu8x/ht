@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 
 // Hash table entry (slot may be filled or empty).
 typedef struct {
@@ -18,6 +19,7 @@ struct ht {
   ht_entry* entries;  // hash slots
   size_t capacity;  // size of _entries array
   size_t length;    // number of items in hash table
+  pthread_mutex_t mtx;
 };
 
 #define INITIAL_CAPACITY 16  // must not be zero
@@ -37,7 +39,13 @@ ht* ht_create(void) {
     free(table); // error, free table before we return!
     return NULL;
   }
-  return table;
+
+  if(pthread_mutex_init(&table->mtx, NULL) == 0) {
+    return table;
+  }
+  free(table->entries);
+  free(table);
+  return NULL;
 }
 
 void ht_destroy(ht* table) {
@@ -45,7 +53,7 @@ void ht_destroy(ht* table) {
   for (size_t i = 0; i < table->capacity; i++) {
     free((void*)table->entries[i].key);
   }
-
+  pthread_mutex_destroy(&table->mtx);
   // Then free entries array and table itself.
   free(table->entries);
   free(table);
@@ -69,20 +77,26 @@ void* ht_get(ht* table, const char* key) {
   // AND hash with capacity-1 to ensure it's within entries array.
   uint64_t hash = hash_key(key);
   size_t index = (size_t)(hash & (uint64_t)(table->capacity - 1));
+  size_t i = index;
 
+  pthread_mutex_lock(&table->mtx);
   // Loop till we find an empty entry.
-  while (table->entries[index].key != NULL) {
-    if (strcmp(key, table->entries[index].key) == 0) {
+  while (table->entries[i].key != NULL) {
+    if (strcmp(key, table->entries[i].key) == 0) {
       // Found key, return value.
-      return table->entries[index].value;
+      void * val = table->entries[i].value;
+      pthread_mutex_unlock(&table->mtx);
+      return val;
     }
     // Key wasn't in this slot, move to next (linear probing).
-    index++;
-    if (index >= table->capacity) {
+    i++;
+    if (i >= table->capacity) {
       // At end of entries array, wrap around.
-      index = 0;
+      i = 0;
     }
+    if (i == index) break;
   }
+  pthread_mutex_unlock(&table->mtx);
   return NULL;
 }
 
@@ -92,20 +106,22 @@ static const char* ht_set_entry(ht_entry* entries, size_t capacity,
   // AND hash with capacity-1 to ensure it's within entries array.
   uint64_t hash = hash_key(key);
   size_t index = (size_t)(hash & (uint64_t)(capacity - 1));
+  size_t i = index;
 
   // Loop till we find an empty entry.
-  while (entries[index].key != NULL) {
-    if (strcmp(key, entries[index].key) == 0) {
+  while (entries[i].key != NULL) {
+    if (strcmp(key, entries[i].key) == 0) {
       // Found key (it already exists), update value.
-      entries[index].value = value;
-      return entries[index].key;
+      entries[i].value = value;
+      return entries[i].key;
     }
     // Key wasn't in this slot, move to next (linear probing).
-    index++;
-    if (index >= capacity) {
+    i++;
+    if (i >= capacity) {
       // At end of entries array, wrap around.
-      index = 0;
+      i = 0;
     }
+    if (i == index) return NULL;
   }
 
   // Didn't find key, allocate+copy if needed, then insert it.
@@ -149,21 +165,28 @@ static bool ht_expand(ht* table) {
   return true;
 }
 
-const char* ht_set(ht* table, const char* key, void* value) {
+int ht_set(ht* table, const char* key, void* value) {
   assert(value != NULL);
   if (value == NULL) {
-    return NULL;
+    return -1;
   }
 
   // If length will exceed half of current capacity, expand it.
   if (table->length >= table->capacity / 2) {
+    pthread_mutex_lock(&table->mtx);
     if (!ht_expand(table)) {
-      return NULL;
+      pthread_mutex_unlock(&table->mtx);
+      return -1;
     }
   }
 
   // Set entry and update length.
-  return ht_set_entry(table->entries, table->capacity, key, value, &table->length);
+  pthread_mutex_lock(&table->mtx);
+  const char * ret = ht_set_entry(
+    table->entries, table->capacity, key, value, &table->length
+  );
+  pthread_mutex_unlock(&table->mtx);
+  return ret ? 0 : -1;
 }
 
 size_t ht_length(ht* table) {
@@ -180,6 +203,7 @@ hti ht_iterator(ht* table) {
 bool ht_next(hti* it) {
   // Loop till we've hit end of entries array.
   ht* table = it->_table;
+  pthread_mutex_lock(&table->mtx);
   while (it->_index < table->capacity) {
     size_t i = it->_index;
     it->_index++;
@@ -188,9 +212,11 @@ bool ht_next(hti* it) {
       ht_entry entry = table->entries[i];
       it->key = entry.key;
       it->value = entry.value;
+      pthread_mutex_unlock(&table->mtx);
       return true;
     }
   }
+  pthread_mutex_unlock(&table->mtx);
   return false;
 }
 
@@ -199,13 +225,19 @@ int ht_remove(ht* table, const char* key) {
   size_t index;
   if (!table) return -1;
   index = (size_t)(hash & (uint64_t)(table->capacity - 1));
-  if (table->entries[index].key == NULL) return -1;
+  pthread_mutex_lock(&table->mtx);
+  if (table->entries[index].key == NULL) {
+    pthread_mutex_unlock(&table->mtx);
+    return -1;
+  }
   while (table->entries[index].key != NULL) {
     if (strcmp(key, table->entries[index].key) == 0) {
       free((void*)table->entries[index].key);
       table->length--;
+      pthread_mutex_unlock(&table->mtx);
       return 0;
     }
   }
+  pthread_mutex_unlock(&table->mtx);
   return -1;
 }
