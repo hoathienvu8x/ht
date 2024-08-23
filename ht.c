@@ -172,8 +172,8 @@ int ht_set(ht* table, const char* key, void* value) {
   }
 
   // If length will exceed half of current capacity, expand it.
+pthread_mutex_lock(&table->mtx);
   if (table->length >= table->capacity / 2) {
-    pthread_mutex_lock(&table->mtx);
     if (!ht_expand(table)) {
       pthread_mutex_unlock(&table->mtx);
       return -1;
@@ -181,7 +181,6 @@ int ht_set(ht* table, const char* key, void* value) {
   }
 
   // Set entry and update length.
-  pthread_mutex_lock(&table->mtx);
   const char * ret = ht_set_entry(
     table->entries, table->capacity, key, value, &table->length
   );
