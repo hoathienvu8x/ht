@@ -205,3 +205,29 @@ bool ht_next(hti* it) {
   }
   return false;
 }
+
+int ht_remove(ht* table, const char* key) {
+  /* AND hash with capacity-1 to ensure it's within entries array. */
+  uint64_t hash = hash_key(key);
+  size_t index = (size_t)(hash & (uint64_t)(table->capacity - 1));
+  size_t prev_index = index;
+
+  /* Loop till we find an empty entry. */
+  while (table->entries[index].key != NULL) {
+    if (strcmp(key, table->entries[index].key) == 0) {
+      /* Found key, return success. */
+      free((void*)table->entries[index].key);
+      table->entries[index].key = NULL;
+      table->length--;
+      return 0;
+    }
+    /* Key wasn't in this slot, move to next (linear probing). */
+    index++;
+    if (index >= table->capacity) {
+      /* At end of entries array, wrap around. */
+      index = 0;
+    }
+    if (index == prev_index) break;
+  }
+  return -1;
+}
