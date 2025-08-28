@@ -49,4 +49,6 @@ bool ht_next(hti* it);
 /* returns -1 on fail */
 int ht_remove(ht* table, const char* key);
 
+void ht_clear(ht *table, void (*f)(void *));
+
 #endif /* _HT_H */

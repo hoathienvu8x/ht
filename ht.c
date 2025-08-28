@@ -231,3 +231,18 @@ int ht_remove(ht* table, const char* key) {
   }
   return -1;
 }
+
+void ht_clear(ht *table, void (*f)(void *)) {
+  size_t i;
+  if (!table) return;
+  for (i = 0; i < table->capacity; i++) {
+    if (table->entries[i].key != NULL) {
+      free((void*)table->entries[i].key);
+      table->entries[i].key = NULL;
+      if (*f) {
+        (*f)(table->entries[i].value);
+      }
+      table->length--;
+    }
+  }
+}
