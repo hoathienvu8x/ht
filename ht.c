@@ -42,6 +42,7 @@ ht* ht_create(void) {
 
 void ht_destroy(ht* table) {
   size_t i = 0;
+  if (!table) return;
   /* First free allocated keys. */
   for (i = 0; i < table->capacity; i++) {
     free((void*)table->entries[i].key);
@@ -70,8 +71,11 @@ static uint64_t hash_key(const char* key) {
 void* ht_get(ht* table, const char* key) {
   /* AND hash with capacity-1 to ensure it's within entries array. */
   uint64_t hash = hash_key(key);
-  size_t index = (size_t)(hash & (uint64_t)(table->capacity - 1));
-  size_t prev_index = index;
+  size_t prev_index, index;
+
+  if (!table || !key) return NULL;
+
+  prev_index = index = (size_t)(hash & (uint64_t)(table->capacity - 1));
 
   /* Loop till we find an empty entry. */
   while (table->entries[index].key != NULL) {
@@ -161,7 +165,7 @@ static bool ht_expand(ht* table) {
 
 const char* ht_set(ht* table, const char* key, void* value) {
   assert(value != NULL);
-  if (value == NULL) {
+  if (!table || value == NULL) {
     return NULL;
   }
 
@@ -179,7 +183,7 @@ const char* ht_set(ht* table, const char* key, void* value) {
 }
 
 size_t ht_length(ht* table) {
-  return table->length;
+  return table ? table->length : 0;
 }
 
 hti ht_iterator(ht* table) {
@@ -192,6 +196,7 @@ hti ht_iterator(ht* table) {
 bool ht_next(hti* it) {
   /* Loop till we've hit end of entries array. */
   ht* table = it->_table;
+  if (!table) return false;
   while (it->_index < table->capacity) {
     size_t i = it->_index;
     it->_index++;
@@ -209,8 +214,11 @@ bool ht_next(hti* it) {
 int ht_remove(ht* table, const char* key) {
   /* AND hash with capacity-1 to ensure it's within entries array. */
   uint64_t hash = hash_key(key);
-  size_t index = (size_t)(hash & (uint64_t)(table->capacity - 1));
-  size_t prev_index = index;
+  size_t prev_index, index;
+
+  if (!table) return -1;
+
+  prev_index = index = (size_t)(hash & (uint64_t)(table->capacity - 1));
 
   /* Loop till we find an empty entry. */
   while (table->entries[index].key != NULL) {
