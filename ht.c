@@ -20,6 +20,7 @@ struct ht {
 };
 
 #define INITIAL_CAPACITY 16  /* must not be zero */
+#define MAX_LOAD_FACTOR 0.75
 
 ht* ht_create(void) {
   /* Allocate space for hash table struct. */
@@ -188,7 +189,7 @@ const char* ht_set(ht* table, const char* key, void* value) {
   }
 
   /* If length will exceed half of current capacity, expand it. */
-  if (table->length >= table->capacity / 2) {
+  if ((double)table->length / table->capacity > MAX_LOAD_FACTOR) {
     if (!ht_expand(table)) {
       return NULL;
     }
@@ -225,6 +226,35 @@ bool ht_next(hti* it) {
       it->value = entry.value;
       return true;
     }
+  }
+  return false;
+}
+
+bool ht_remove(ht* table, const char *key, void **value) {
+  uint64_t hash;
+  size_t index, prev;
+  /* AND hash with capacity-1 to ensure it's within entries array. */
+  if (!table || table->entries || key || !*key) {
+    return false;
+  }
+  hash = hash_key(key);
+  index = (size_t)(hash & (uint64_t)(table->capacity - 1));
+  prev = index;
+
+  /* Loop till we find an empty entry. */
+  while (table->entries[index].key != NULL) {
+    if (strcmp(key, table->entries[index].key) == 0) {
+      *value = table->entries[index].value;
+      table->length--;
+      return true;
+    }
+    /* Key wasn't in this slot, move to next (linear probing). */
+    index++;
+    if (index >= table->capacity) {
+      /* At end of entries array, wrap around. */
+      index = 0;
+    }
+    if (prev == index) break;
   }
   return false;
 }
