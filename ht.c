@@ -33,7 +33,7 @@ ht* ht_create(void) {
   table->capacity = INITIAL_CAPACITY;
 
   /* Allocate (zero'd) space for entry buckets. */
-  table->entries = calloc(table->capacity, sizeof(ht_entry));
+  table->entries = (ht_entry*)calloc(table->capacity, sizeof(ht_entry));
   if (table->entries == NULL) {
     free(table); /* error, free table before we return! */
     return NULL;
@@ -45,8 +45,7 @@ ht* ht_create(void) {
   }
   return table;
 }
-
-void ht_destroy(ht* table) {
+void ht_disponse(ht* table, void (*f)(void *)) {
   size_t i;
   if (!table) return;
   pthread_rwlock_destroy(&table->rw_lock);
@@ -55,12 +54,20 @@ void ht_destroy(ht* table) {
     for (i = 0; i < table->capacity; i++) {
       if (table->entries[i].key) {
         free((void*)table->entries[i].key);
+        table->entries[i].key = NULL;
+      }
+      if (*f && table->entries[i].value) {
+        (*f)(table->entries[i].value);
+        table->entries[i].value = NULL;
       }
     }
     free(table->entries);
   }
   /* Then free entries array and table itself. */
   free(table);
+}
+void ht_destroy(ht* table) {
+  ht_disponse(table, NULL);
 }
 
 #define FNV_OFFSET 14695981039346656037UL
@@ -270,6 +277,8 @@ bool ht_remove(ht* table, const char *key, void **value) {
     if (strcmp(key, table->entries[index].key) == 0) {
       *value = table->entries[index].value;
       table->length--;
+      free((void *)table->entries[index].key);
+      table->entries[index].key = NULL;
       pthread_rwlock_unlock(&table->rw_lock);
       return true;
     }
