@@ -260,7 +260,40 @@ bool ht_next(hti* it) {
   return false;
 }
 
-bool ht_remove(ht* table, const char *key, void **value) {
+bool ht_remove(ht* table, const char *key) {
+  uint64_t hash;
+  size_t index, prev;
+  /* AND hash with capacity-1 to ensure it's within entries array. */
+  if (!table || table->entries || key || !*key) {
+    return false;
+  }
+  pthread_rwlock_wrlock(&table->rw_lock);
+  hash = hash_key(key);
+  index = (size_t)(hash & (uint64_t)(table->capacity - 1));
+  prev = index;
+
+  /* Loop till we find an empty entry. */
+  while (table->entries[index].key != NULL) {
+    if (strcmp(key, table->entries[index].key) == 0) {
+      table->entries[index].value = NULL;
+      table->length--;
+      free((void *)table->entries[index].key);
+      table->entries[index].key = NULL;
+      pthread_rwlock_unlock(&table->rw_lock);
+      return true;
+    }
+    /* Key wasn't in this slot, move to next (linear probing). */
+    index++;
+    if (index >= table->capacity) {
+      /* At end of entries array, wrap around. */
+      index = 0;
+    }
+    if (prev == index) break;
+  }
+  pthread_rwlock_unlock(&table->rw_lock);
+  return false;
+}
+bool ht_remove_ref(ht* table, const char *key, void **value) {
   uint64_t hash;
   size_t index, prev;
   /* AND hash with capacity-1 to ensure it's within entries array. */
@@ -276,6 +309,7 @@ bool ht_remove(ht* table, const char *key, void **value) {
   while (table->entries[index].key != NULL) {
     if (strcmp(key, table->entries[index].key) == 0) {
       *value = table->entries[index].value;
+      table->entries[index].value = NULL;
       table->length--;
       free((void *)table->entries[index].key);
       table->entries[index].key = NULL;
