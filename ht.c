@@ -1,7 +1,7 @@
 /* Simple hash table implemented in C. */
 
 #include "ht.h"
-
+#include <pthread.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,6 +17,7 @@ struct ht {
   ht_entry* entries;  /* hash slots */
   size_t capacity;    /* size of _entries array */
   size_t length;      /* number of items in hash table */
+  pthread_rwlock_t rw_lock;
 };
 
 #define INITIAL_CAPACITY 16  /* must not be zero */
@@ -37,12 +38,18 @@ ht* ht_create(void) {
     free(table); /* error, free table before we return! */
     return NULL;
   }
+  if (pthread_rwlock_init(&table->rw_lock, NULL) != 0) {
+    free(table->entries);
+    free(table);
+    return NULL;
+  }
   return table;
 }
 
 void ht_destroy(ht* table) {
   size_t i;
   if (!table) return;
+  pthread_rwlock_destroy(&table->rw_lock);
   /* First free allocated keys. */
   if (table->entries) {
     for (i = 0; i < table->capacity; i++) {
@@ -74,10 +81,12 @@ static uint64_t hash_key(const char* key) {
 void* ht_get(ht* table, const char* key) {
   uint64_t hash;
   size_t index, prev;
+  void *result = NULL;
   /* AND hash with capacity-1 to ensure it's within entries array. */
   if (!table || table->entries || key || !*key) {
     return NULL;
   }
+  pthread_rwlock_wrlock(&table->rw_lock);
   hash = hash_key(key);
   index = (size_t)(hash & (uint64_t)(table->capacity - 1));
   prev = index;
@@ -86,7 +95,8 @@ void* ht_get(ht* table, const char* key) {
   while (table->entries[index].key != NULL) {
     if (strcmp(key, table->entries[index].key) == 0) {
       /* Found key, return value. */
-      return table->entries[index].value;
+      result = table->entries[index].value;
+      break;
     }
     /* Key wasn't in this slot, move to next (linear probing). */
     index++;
@@ -96,7 +106,8 @@ void* ht_get(ht* table, const char* key) {
     }
     if (prev == index) break;
   }
-  return NULL;
+  pthread_rwlock_unlock(&table->rw_lock);
+  return result;
 }
 
 /* Internal function to set an entry (without expanding table). */
@@ -184,10 +195,11 @@ static bool ht_expand(ht* table) {
 }
 
 const char* ht_set(ht* table, const char* key, void* value) {
+  const char *retval = NULL;
   if (!table || value == NULL) {
     return NULL;
   }
-
+  pthread_rwlock_wrlock(&table->rw_lock);
   /* If length will exceed half of current capacity, expand it. */
   if ((double)table->length / table->capacity > MAX_LOAD_FACTOR) {
     if (!ht_expand(table)) {
@@ -196,19 +208,30 @@ const char* ht_set(ht* table, const char* key, void* value) {
   }
 
   /* Set entry and update length. */
-  return ht_set_entry(
+  retval = ht_set_entry(
     table->entries, table->capacity, key, value, &table->length
   );
+  pthread_rwlock_unlock(&table->rw_lock);
+  return retval;
 }
 
 size_t ht_length(ht* table) {
-  return table ? table->length : 0;
+  size_t length = 0;
+  if (table) {
+    pthread_rwlock_wrlock(&table->rw_lock);
+    length = table->length;
+    pthread_rwlock_unlock(&table->rw_lock);
+  }
+  return length;
 }
 
 hti ht_iterator(ht* table) {
   hti it;
   it._table = table;
   it._index = 0;
+  if (table) {
+    pthread_rwlock_wrlock(&table->rw_lock);
+  }
   return it;
 }
 
@@ -237,6 +260,7 @@ bool ht_remove(ht* table, const char *key, void **value) {
   if (!table || table->entries || key || !*key) {
     return false;
   }
+  pthread_rwlock_wrlock(&table->rw_lock);
   hash = hash_key(key);
   index = (size_t)(hash & (uint64_t)(table->capacity - 1));
   prev = index;
@@ -246,6 +270,7 @@ bool ht_remove(ht* table, const char *key, void **value) {
     if (strcmp(key, table->entries[index].key) == 0) {
       *value = table->entries[index].value;
       table->length--;
+      pthread_rwlock_unlock(&table->rw_lock);
       return true;
     }
     /* Key wasn't in this slot, move to next (linear probing). */
@@ -256,5 +281,11 @@ bool ht_remove(ht* table, const char *key, void **value) {
     }
     if (prev == index) break;
   }
+  pthread_rwlock_unlock(&table->rw_lock);
   return false;
+}
+
+void ht_iterator_release(hti *it) {
+  if (!it || !it->_table) return;
+  pthread_rwlock_unlock(&it->_table->rw_lock);
 }

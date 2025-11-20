@@ -48,4 +48,6 @@ bool ht_next(hti* it);
 
 bool ht_remove(ht* table, const char *key, void **value);
 
+void ht_iterator_release(hti *it);
+
 #endif /* _HT_H */
